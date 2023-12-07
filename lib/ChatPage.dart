@@ -1,4 +1,9 @@
+import 'dart:io';
+
 import 'package:audioplayers/audioplayers.dart';
+import 'package:dart_openai/dart_openai.dart';
+import 'package:devfest23/main.env.dart';
+import 'package:devfest23/support/flutter/spacing.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:flutter_sound_record/flutter_sound_record.dart';
@@ -18,9 +23,14 @@ class ChatPage extends HookWidget {
   Widget build(BuildContext context) {
     final recorder = useMemoized(FlutterSoundRecord.new);
     final audioPlayer = useMemoized(AudioPlayer.new);
+    final openai = useMemoized(() {
+      OpenAI.apiKey = kOpenAiApiKey;
+      return OpenAI.instance;
+    });
 
     final isRecording = useState(false);
     final recordingPath = useState<String?>(null);
+    final transcription = useState<String?>(null);
 
     Future<void> onFabPressed() async {
       // check if we have Mic permissions and if not request
@@ -32,7 +42,16 @@ class ChatPage extends HookWidget {
       // GUARD: toggle recording
       if (isRecording.value) {
         await recorder.stop();
+        // isRecording.value = false;
+        final recPath = recordingPath.value!;
+        final response = await openai.audio.createTranscription(
+          file: File(recPath),
+          model: 'whisper-1',
+        );
+
+        transcription.value = response.text;
         isRecording.value = false;
+
         return;
       }
 
@@ -74,6 +93,11 @@ class ChatPage extends HookWidget {
               child: const Text(
                 'Play recording',
               ),
+            ),
+            2.pt.box,
+            Text(
+              transcription.value ?? 'No transcription yet',
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
           ],
         ),
