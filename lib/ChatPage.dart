@@ -31,6 +31,7 @@ class ChatPage extends HookWidget {
     final isRecording = useState(false);
     final recordingPath = useState<String?>(null);
     final transcription = useState<String?>(null);
+    final aiResponse = useState<String?>(null);
 
     Future<void> onFabPressed() async {
       // check if we have Mic permissions and if not request
@@ -50,6 +51,26 @@ class ChatPage extends HookWidget {
         );
 
         transcription.value = response.text;
+
+        final chatResp = await openai.chat.create(
+          model: "gpt-4-1106-preview",
+          messages: [
+            OpenAIChatCompletionChoiceMessageModel(
+              role: OpenAIChatMessageRole.user,
+              content: [
+                OpenAIChatCompletionChoiceMessageContentItemModel.text(
+                  response.text,
+                ),
+              ],
+            ),
+          ],
+        );
+        aiResponse.value = chatResp.choices.first.message.content
+            ?.firstWhere(
+              (element) => element.type == "text",
+            )
+            .text;
+
         isRecording.value = false;
 
         return;
@@ -81,25 +102,35 @@ class ChatPage extends HookWidget {
         title: Text(title),
       ),
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            TextButton(
-              onPressed: switch (
-                  recordingPath.value == null || isRecording.value) {
-                true => null,
-                false => playRecording,
-              },
-              child: const Text(
-                'Play recording',
+        child: Padding(
+          padding: 5.pt.all,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              TextButton(
+                onPressed: switch (
+                    recordingPath.value == null || isRecording.value) {
+                  true => null,
+                  false => playRecording,
+                },
+                child: const Text(
+                  'Play recording',
+                ),
               ),
-            ),
-            2.pt.box,
-            Text(
-              transcription.value ?? 'No transcription yet',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
+              2.pt.box,
+              Text(
+                transcription.value ?? 'No transcription yet',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              2.pt.box,
+              Text(
+                aiResponse.value ?? 'No response yet',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.secondary,
+                    ),
+              ),
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
