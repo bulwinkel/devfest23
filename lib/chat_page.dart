@@ -35,6 +35,7 @@ class ChatPage extends HookWidget {
     final status = useState(ChatStatus.idle);
     final recordingPath = useState('');
     final transcription = useState('');
+    final botText = useState('');
 
     Future<void> onFabPressed() async {
       final dir = await getApplicationDocumentsDirectory();
@@ -53,12 +54,27 @@ class ChatPage extends HookWidget {
           case ChatStatus.recording:
             await recorder.stop();
             status.value = ChatStatus.processing;
+
             final transcribeResp = await openai.audio.createTranscription(
               file: File(recordingPath.value),
               model: 'whisper-1',
             );
-
             transcription.value = transcribeResp.text;
+
+            final chatResp = await openai.chat.create(
+              model: 'gpt-4-1106-preview',
+              messages: [
+                OpenAIChatCompletionChoiceMessageModel(
+                  role: OpenAIChatMessageRole.user,
+                  content: [
+                    OpenAIChatCompletionChoiceMessageContentItemModel.text(
+                      transcription.value,
+                    ),
+                  ],
+                ),
+              ],
+            );
+            botText.value = chatResp.choices.first.message.content!.first.text!;
 
             status.value = ChatStatus.idle;
             break;
@@ -95,6 +111,11 @@ class ChatPage extends HookWidget {
               Text(
                 transcription.value,
               ),
+              2.pt.box,
+              Text(
+                botText.value,
+              ),
+              2.pt.box,
               TextButton(
                 onPressed: switch (status.value == ChatStatus.idle &&
                     recordingPath.value.isNotEmpty) {
