@@ -1,4 +1,10 @@
+import 'dart:io';
+
 import 'package:audioplayers/audioplayers.dart';
+import 'package:dart_openai/dart_openai.dart';
+import 'package:devfest23/main.env.dart';
+import 'package:devfest23/support/flutter/snackbar.dart';
+import 'package:devfest23/support/flutter/spacing.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:flutter_sound_record/flutter_sound_record.dart';
@@ -18,33 +24,52 @@ class ChatPage extends HookWidget {
 
   @override
   Widget build(BuildContext context) {
+    final snack = Snack(context);
     final recorder = useMemoized(FlutterSoundRecord.new);
     final audioPlayers = useMemoized(AudioPlayer.new);
+    final openai = useMemoized(() {
+      OpenAI.apiKey = kOpenAiApiKey;
+      return OpenAI.instance;
+    });
 
     final status = useState(ChatStatus.idle);
     final recordingPath = useState('');
+    final transcription = useState('');
 
     Future<void> onFabPressed() async {
       final dir = await getApplicationDocumentsDirectory();
 
-      switch (status.value) {
-        case ChatStatus.idle:
-          status.value = ChatStatus.recording;
+      try {
+        switch (status.value) {
+          case ChatStatus.idle:
+            status.value = ChatStatus.recording;
 
-          final path = join(dir.path, 'recording.mp4');
-          await recorder.start(
-            path: path,
-          );
-          recordingPath.value = path;
-          break;
-        case ChatStatus.recording:
-          await recorder.stop();
-          // status.value = ChatStatus.processing;
-          status.value = ChatStatus.idle;
-          break;
-        case ChatStatus.processing:
-          status.value = ChatStatus.idle;
-          break;
+            final path = join(dir.path, 'recording.mp4');
+            await recorder.start(
+              path: path,
+            );
+            recordingPath.value = path;
+            break;
+          case ChatStatus.recording:
+            await recorder.stop();
+            status.value = ChatStatus.processing;
+            final transcribeResp = await openai.audio.createTranscription(
+              file: File(recordingPath.value),
+              model: 'whisper-1',
+            );
+
+            transcription.value = transcribeResp.text;
+
+            status.value = ChatStatus.idle;
+            break;
+          case ChatStatus.processing:
+            status.value = ChatStatus.idle;
+            break;
+        }
+      } catch (e) {
+        print("error: $e");
+        snack.error("Something went wrong 😢");
+        status.value = ChatStatus.idle;
       }
     }
 
@@ -62,20 +87,26 @@ class ChatPage extends HookWidget {
         title: Text(title),
       ),
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            TextButton(
-              onPressed: switch (status.value == ChatStatus.idle &&
-                  recordingPath.value.isNotEmpty) {
-                true => playRecording,
-                false => null,
-              },
-              child: Text(
-                'Push to play',
+        child: Padding(
+          padding: 5.pt.all,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Text(
+                transcription.value,
               ),
-            ),
-          ],
+              TextButton(
+                onPressed: switch (status.value == ChatStatus.idle &&
+                    recordingPath.value.isNotEmpty) {
+                  true => playRecording,
+                  false => null,
+                },
+                child: Text(
+                  'Push to play',
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
