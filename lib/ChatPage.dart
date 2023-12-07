@@ -11,6 +11,12 @@ import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
+enum ChatStatus {
+  idle,
+  recording,
+  processing,
+}
+
 class ChatPage extends HookWidget {
   const ChatPage({
     super.key,
@@ -28,7 +34,7 @@ class ChatPage extends HookWidget {
       return OpenAI.instance;
     });
 
-    final isRecording = useState(false);
+    final status = useState(ChatStatus.idle);
     final recordingPath = useState<String?>(null);
     final transcription = useState<String?>(null);
     final aiResponse = useState<String?>(null);
@@ -40,53 +46,59 @@ class ChatPage extends HookWidget {
         return;
       }
 
-      // GUARD: toggle recording
-      if (isRecording.value) {
-        await recorder.stop();
-        // isRecording.value = false;
-        final recPath = recordingPath.value!;
-        final response = await openai.audio.createTranscription(
-          file: File(recPath),
-          model: 'whisper-1',
-        );
+      switch (status.value) {
+        case ChatStatus.idle:
+          status.value = ChatStatus.recording;
+          try {
+            final recordingId = Uuid().v4();
+            final dir = await getApplicationDocumentsDirectory();
+            final path = join(dir.path, "$recordingId.mp4");
+            await recorder.start(
+              path: path,
+            );
+            recordingPath.value = path;
+          } catch (e) {
+            print("Recording failed: $e");
+          }
+          break;
 
-        transcription.value = response.text;
+        case ChatStatus.recording:
+          status.value = ChatStatus.processing;
 
-        final chatResp = await openai.chat.create(
-          model: "gpt-4-1106-preview",
-          messages: [
-            OpenAIChatCompletionChoiceMessageModel(
-              role: OpenAIChatMessageRole.user,
-              content: [
-                OpenAIChatCompletionChoiceMessageContentItemModel.text(
-                  response.text,
-                ),
-              ],
-            ),
-          ],
-        );
-        aiResponse.value = chatResp.choices.first.message.content
-            ?.firstWhere(
-              (element) => element.type == "text",
-            )
-            .text;
+          await recorder.stop();
+          // status.value = false;
+          final recPath = recordingPath.value!;
+          final response = await openai.audio.createTranscription(
+            file: File(recPath),
+            model: 'whisper-1',
+          );
 
-        isRecording.value = false;
+          transcription.value = response.text;
 
-        return;
-      }
+          final chatResp = await openai.chat.create(
+            model: "gpt-4-1106-preview",
+            messages: [
+              OpenAIChatCompletionChoiceMessageModel(
+                role: OpenAIChatMessageRole.user,
+                content: [
+                  OpenAIChatCompletionChoiceMessageContentItemModel.text(
+                    response.text,
+                  ),
+                ],
+              ),
+            ],
+          );
 
-      isRecording.value = true;
-      try {
-        final recordingId = Uuid().v4();
-        final dir = await getApplicationDocumentsDirectory();
-        final path = join(dir.path, "$recordingId.mp4");
-        await recorder.start(
-          path: path,
-        );
-        recordingPath.value = path;
-      } catch (e) {
-        print("Recording failed: $e");
+          aiResponse.value = chatResp.choices.first.message.content
+              ?.firstWhere(
+                (element) => element.type == "text",
+              )
+              .text;
+          status.value = ChatStatus.idle;
+          break;
+
+        case ChatStatus.processing:
+          break;
       }
     }
 
@@ -108,10 +120,10 @@ class ChatPage extends HookWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
               TextButton(
-                onPressed: switch (
-                    recordingPath.value == null || isRecording.value) {
-                  true => null,
-                  false => playRecording,
+                onPressed: switch (status.value) {
+                  ChatStatus.recording => null,
+                  ChatStatus.processing => null,
+                  ChatStatus.idle => playRecording,
                 },
                 child: const Text(
                   'Play recording',
@@ -136,9 +148,11 @@ class ChatPage extends HookWidget {
       floatingActionButton: FloatingActionButton(
         onPressed: onFabPressed,
         tooltip: 'Increment',
-        child: isRecording.value
-            ? const CircularProgressIndicator()
-            : const Icon(Icons.mic),
+        child: switch (status.value) {
+          ChatStatus.recording => const Icon(Icons.stop),
+          ChatStatus.processing => const CircularProgressIndicator(),
+          ChatStatus.idle => const Icon(Icons.mic),
+        },
       ),
     );
   }
