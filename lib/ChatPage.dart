@@ -17,6 +17,27 @@ enum ChatStatus {
   processing,
 }
 
+enum ChatMessageSender {
+  user,
+  bot,
+}
+
+typedef ChatMessage = ({
+  String id,
+  ChatMessageSender sender,
+  String message,
+});
+
+extension on ChatMessage {
+  String get audioFileName {
+    final extension = switch (sender) {
+      ChatMessageSender.user => "mp4",
+      ChatMessageSender.bot => "mp3",
+    };
+    return "$id.$extension";
+  }
+}
+
 class ChatPage extends HookWidget {
   const ChatPage({
     super.key,
@@ -35,9 +56,7 @@ class ChatPage extends HookWidget {
     });
 
     final status = useState(ChatStatus.idle);
-    final recordingPath = useState<String?>(null);
-    final transcription = useState<String?>(null);
-    final aiResponse = useState<String?>(null);
+    final messages = useState<List<ChatMessage>>([]);
 
     Future<void> onFabPressed() async {
       // check if we have Mic permissions and if not request
@@ -47,6 +66,7 @@ class ChatPage extends HookWidget {
       }
 
       final dir = await getApplicationDocumentsDirectory();
+      String audioPath(String fileName) => join(dir.path, fileName);
 
       switch (status.value) {
         case ChatStatus.idle:
@@ -57,7 +77,15 @@ class ChatPage extends HookWidget {
             await recorder.start(
               path: path,
             );
-            recordingPath.value = path;
+
+            messages.value = [
+              ...messages.value,
+              (
+                id: recordingId,
+                sender: ChatMessageSender.user,
+                message: "Recording...",
+              ),
+            ];
           } catch (e) {
             print("Recording failed: $e");
           }
@@ -68,13 +96,24 @@ class ChatPage extends HookWidget {
 
           await recorder.stop();
           // status.value = false;
-          final recPath = recordingPath.value!;
+          final recPath = audioPath(messages.value.last.audioFileName);
           final response = await openai.audio.createTranscription(
             file: File(recPath),
             model: 'whisper-1',
           );
 
-          transcription.value = response.text;
+          messages.value = [
+            ...messages.value.map((it) {
+              if (it.id == messages.value.last.id) {
+                return (
+                  id: it.id,
+                  sender: it.sender,
+                  message: response.text,
+                );
+              }
+              return it;
+            }),
+          ];
 
           final chatResp = await openai.chat.create(
             model: "gpt-4-1106-preview",
@@ -99,18 +138,27 @@ class ChatPage extends HookWidget {
 
           // handle empty response
           if (chatRespText.isEmpty) {
-            aiResponse.value = "No response";
+            //TODO:KB 7/12/2023 handle empty response
             status.value = ChatStatus.idle;
             return;
           }
 
-          aiResponse.value = chatRespText;
+          final aiMessage = (
+            id: Uuid().v4(),
+            sender: ChatMessageSender.bot,
+            message: chatRespText,
+          );
+          messages.value = [
+            ...messages.value,
+            aiMessage,
+          ];
 
           final mp3 = await openai.audio.createSpeech(
             model: "tts-1",
-            voice: "alloy",
+            // voice: "alloy",
+            voice: "echo",
             input: chatRespText,
-            outputFileName: "response.mp3",
+            outputFileName: aiMessage.audioFileName,
             outputDirectory: dir,
           );
 
@@ -124,10 +172,13 @@ class ChatPage extends HookWidget {
       }
     }
 
-    Future<void> playRecording() async {
-      final path = recordingPath.value;
-      if (path == null) return;
-      audioPlayer.play(DeviceFileSource(path));
+    Future<void> playLatest() async {
+      final msgs = messages.value;
+      if (msgs.isEmpty) return;
+      final dir = await getApplicationDocumentsDirectory();
+      final path = join(dir.path, msgs.last.audioFileName);
+
+      await audioPlayer.play(DeviceFileSource(path));
     }
 
     return Scaffold(
@@ -135,37 +186,42 @@ class ChatPage extends HookWidget {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(title),
       ),
-      body: Center(
-        child: Padding(
-          padding: 5.pt.all,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              TextButton(
-                onPressed: switch (status.value) {
-                  ChatStatus.recording => null,
-                  ChatStatus.processing => null,
-                  ChatStatus.idle => playRecording,
-                },
-                child: const Text(
-                  'Play recording',
-                ),
-              ),
-              2.pt.box,
-              Text(
-                transcription.value ?? 'No transcription yet',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              2.pt.box,
-              Text(
-                aiResponse.value ?? 'No response yet',
+      body: ListView(
+        padding: 5.pt.all,
+        children: <Widget>[
+          for (final message in messages.value)
+            ListTile(
+              title: Text(
+                message.message,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.secondary,
+                      color: message.sender == ChatMessageSender.user
+                          ? Theme.of(context).colorScheme.secondary
+                          : null,
                     ),
               ),
-            ],
-          ),
-        ),
+              subtitle: Text(
+                message.sender == ChatMessageSender.user
+                    ? "You"
+                    : "DevFest Bot",
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.tertiary,
+                    ),
+              ),
+            ),
+          if (messages.value.isNotEmpty) ...[
+            2.pt.box,
+            TextButton(
+              onPressed: switch (status.value) {
+                ChatStatus.recording => null,
+                ChatStatus.processing => null,
+                ChatStatus.idle => playLatest,
+              },
+              child: const Text(
+                'Play latest',
+              ),
+            ),
+          ],
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: onFabPressed,
