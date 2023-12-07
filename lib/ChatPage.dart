@@ -46,12 +46,13 @@ class ChatPage extends HookWidget {
         return;
       }
 
+      final dir = await getApplicationDocumentsDirectory();
+
       switch (status.value) {
         case ChatStatus.idle:
           status.value = ChatStatus.recording;
           try {
             final recordingId = Uuid().v4();
-            final dir = await getApplicationDocumentsDirectory();
             final path = join(dir.path, "$recordingId.mp4");
             await recorder.start(
               path: path,
@@ -89,11 +90,32 @@ class ChatPage extends HookWidget {
             ],
           );
 
-          aiResponse.value = chatResp.choices.first.message.content
-              ?.firstWhere(
-                (element) => element.type == "text",
-              )
-              .text;
+          final chatRespText = chatResp.choices.first.message.content
+                  ?.firstWhere(
+                    (element) => element.type == "text",
+                  )
+                  .text ??
+              "";
+
+          // handle empty response
+          if (chatRespText.isEmpty) {
+            aiResponse.value = "No response";
+            status.value = ChatStatus.idle;
+            return;
+          }
+
+          aiResponse.value = chatRespText;
+
+          final mp3 = await openai.audio.createSpeech(
+            model: "tts-1",
+            voice: "alloy",
+            input: chatRespText,
+            outputFileName: "response.mp3",
+            outputDirectory: dir,
+          );
+
+          await audioPlayer.play(DeviceFileSource(mp3.path));
+
           status.value = ChatStatus.idle;
           break;
 
