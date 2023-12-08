@@ -34,6 +34,7 @@ class ChatPage extends HookWidget {
 
     final status = useState(ChatStatus.idle);
     final text = useState('');
+    final bot = useState('');
 
     Future<void> onFabPressed() async {
       final dir = await getApplicationDocumentsDirectory();
@@ -56,6 +57,21 @@ class ChatPage extends HookWidget {
               model: "whisper-1",
             );
             text.value = resp.text;
+
+            final botResp = await openai.chat.create(
+              model: "gpt-3.5-turbo",
+              messages: [
+                OpenAIChatCompletionChoiceMessageModel(
+                  role: OpenAIChatMessageRole.user,
+                  content: [
+                    OpenAIChatCompletionChoiceMessageContentItemModel.text(
+                      text.value,
+                    ),
+                  ],
+                ),
+              ],
+            );
+            bot.value = botResp.choices.first.message.content?.first.text ?? "";
 
             status.value = ChatStatus.idle;
             break;
@@ -81,18 +97,23 @@ class ChatPage extends HookWidget {
         title: Text(title),
       ),
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text(text.value),
-            2.pt.box,
-            TextButton(
-              onPressed: play,
-              child: Text(
-                'Push to play',
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Text(text.value),
+              2.pt.box,
+              Text(bot.value),
+              2.pt.box,
+              TextButton(
+                onPressed: play,
+                child: Text(
+                  'Push to play',
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
