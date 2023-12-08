@@ -45,13 +45,16 @@ class ChatPage extends HookWidget {
     final messages = useList(<ChatMessage>[]);
 
     Future<void> onFabPressed() async {
-      final dir = await getApplicationDocumentsDirectory();
-      final path = dir.path;
-
       try {
+        final dir = await getApplicationDocumentsDirectory();
+        final path = dir.path;
+
         switch (status.value) {
           case ChatStatus.idle:
+
+            // 1. record microphone input
             status.value = ChatStatus.recording;
+
             final recId = Uuid().v4();
             final recordingPath = join(path, '$recId.mp4');
             messages.add((
@@ -67,31 +70,28 @@ class ChatPage extends HookWidget {
 
             break;
           case ChatStatus.recording:
+            // 1.1. stop recording
             status.value = ChatStatus.processing;
             await recorder.stop();
 
+            // 2. transcribe recording to text
             final message = messages.get().last;
-            print("message: $message");
-
             final resp = await openai.audio.createTranscription(
               file: File(message.audioPath),
               model: "whisper-1",
             );
 
             messages.update(
-              (it) {
-                return it.id == message.id;
-              },
-              (it) {
-                return (
-                  id: message.id,
-                  role: message.role,
-                  audioPath: message.audioPath,
-                  message: resp.text,
-                );
-              },
+              (it) => it.id == message.id,
+              (it) => (
+                id: message.id,
+                role: message.role,
+                audioPath: message.audioPath,
+                message: resp.text,
+              ),
             );
 
+            // 3. generate conversation
             final botResp = await openai.chat.create(
               model: "gpt-3.5-turbo",
               messages: [
@@ -116,12 +116,13 @@ class ChatPage extends HookWidget {
             );
             messages.add(botMessage);
 
+            // 4. make it speak
             final makeItSpeakResp = await openai.audio.createSpeech(
               model: "tts-1",
               input: botMessage.message,
-              voice: "alloy",
+              voice: "shimmer",
               outputDirectory: dir,
-              outputFileName: '$botMessageId.mp3',
+              outputFileName: botMessageId,
             );
 
             await player.play(DeviceFileSource(makeItSpeakResp.path));
@@ -132,22 +133,33 @@ class ChatPage extends HookWidget {
             break;
         }
       } catch (e) {
-        snack.error("Some didn't work");
+        snack.error("Uh oh, something went wrong! 🙃");
         status.value = ChatStatus.idle;
       }
     }
 
-    Future<void> play() async {
-      final dir = await getApplicationDocumentsDirectory();
-      final path = dir.path;
-      final recordingPath = join(path, 'recording.mp4');
-      await player.play(DeviceFileSource(recordingPath));
+    Future<void> togglePlay(ChatMessage message) async {
+      if (status.value != ChatStatus.idle) return;
+
+      if (player.state == PlayerState.playing) {
+        await player.stop();
+      } else {
+        await player.play(DeviceFileSource(message.audioPath));
+      }
     }
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(title),
+        actions: [
+          IconButton(
+            onPressed: () {
+              messages.clear();
+            },
+            icon: Icon(Icons.delete_sweep),
+          ),
+        ],
       ),
       body: ListView(
         padding: 5.pt.all,
@@ -156,6 +168,7 @@ class ChatPage extends HookWidget {
             ListTile(
               title: Text(message.message),
               subtitle: Text(message.role.name),
+              onTap: () => togglePlay(message),
             ),
         ],
       ),

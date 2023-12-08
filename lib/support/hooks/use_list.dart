@@ -2,6 +2,7 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 
 ({
   Null Function(T item) add,
+  Null Function() clear,
   List<T> Function() get,
   Null Function(T item) remove,
   Null Function(bool Function(T p1) selector, T Function(T p1) update) update
@@ -29,10 +30,15 @@ import 'package:flutter_hooks/flutter_hooks.dart';
     }).toList();
   }, [list.value]);
 
+  final clear = useCallback(() {
+    list.value = [];
+  }, [list.value]);
+
   return (
     get: () => list.value,
     add: add,
-    remove: remove,
     update: update,
+    remove: remove,
+    clear: clear,
   );
 }
