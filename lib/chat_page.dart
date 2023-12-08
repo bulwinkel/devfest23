@@ -73,6 +73,16 @@ class ChatPage extends HookWidget {
             );
             bot.value = botResp.choices.first.message.content?.first.text ?? "";
 
+            final makeItSpeakResp = await openai.audio.createSpeech(
+              model: "tts-1",
+              input: bot.value,
+              voice: "alloy",
+              outputDirectory: dir,
+              outputFileName: "bot.mp3",
+            );
+
+            await player.play(DeviceFileSource(makeItSpeakResp.path));
+
             status.value = ChatStatus.idle;
             break;
           case ChatStatus.processing:
